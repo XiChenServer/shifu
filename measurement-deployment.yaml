@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: measurement-app
+  namespace: deviceshifu
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: measurement-app
+  template:
+    metadata:
+      labels:
+        app: measurement-app
+    spec:
+      containers:
+        - name: measurement-app
+          image: your-docker-repo/measurement-app:latest
+          imagePullPolicy: Always
