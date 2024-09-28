@@ -1,64 +1,85 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
-	"os/exec"
+	"io"
+	"log"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
 
-func getMeasurement() ([]float64, error) {
-	cmd := exec.Command("sudo", "kubectl", "exec", "nginx", "--", "curl", "http://deviceshifu-plate-reader.deviceshifu.svc.cluster.local/get_measurement")
+func fetchMeasurements() ([][]float64, error) {
+	resp, err := http.Get("http://deviceshifu-plate-reader.deviceshifu.svc.cluster.local/get_measurement")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
 
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("error: %s: %s", err, stderr.String())
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
 	}
 
-	body := out.String()
+	fmt.Println("Response body:", string(body))
 
-	// 解析返回值为浮点数切片
-	var measurements []float64
-	for _, s := range strings.Fields(body) {
-		value, err := strconv.ParseFloat(s, 64)
-		if err == nil {
-			measurements = append(measurements, value)
+	// 处理空格分隔的数字
+	lines := strings.Split(string(body), "\n")
+	var measurements [][]float64
+
+	for _, line := range lines {
+		if line == "" {
+			continue // 跳过空行
 		}
+		var row []float64
+		values := strings.Fields(line)
+		for _, value := range values {
+			num, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return nil, err
+			}
+			row = append(row, num)
+		}
+		measurements = append(measurements, row)
 	}
 	return measurements, nil
 }
 
-func main() {
-	ticker := time.NewTicker(10 * time.Second) // 默认每10秒请求一次
-	defer ticker.Stop()
+func calculateAverage(measurements [][]float64) float64 {
+	sum := 0.0
+	count := 0
 
-	for {
-		select {
-		case <-ticker.C:
-			measurements, err := getMeasurement()
-			if err != nil {
-				fmt.Printf("Error fetching data: %v\n", err)
-				continue
-			}
-
-			// 计算平均值
-			var sum float64
-			fmt.Println(measurements)
-			for _, m := range measurements {
-				sum += m
-			}
-			if len(measurements) > 0 {
-				avg := sum / float64(len(measurements))
-				fmt.Printf("Average measurement: %.2f\n", avg)
-			} else {
-				fmt.Println("No measurements found.")
-			}
+	for _, row := range measurements {
+		for _, value := range row {
+			sum += value
+			count++
 		}
 	}
+
+	if count == 0 {
+		return 0
+	}
+	return sum / float64(count)
 }
+
+func main() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		measurements, err := fetchMeasurements()
+		if err != nil {
+			log.Println("Error fetching data:", err)
+			continue
+		}
+		average := calculateAverage(measurements)
+		fmt.Println("Average measurement:", average)
+	}
+}
+
+//  docker build --tag measurement:v0.0.1 .
+// sudo kind load docker-image measurement:v0.0.1
+// sudo kubectl run measurement --image=measurement:v0.0.1
+// sudo kubectl logs measurement -f
+//  sudo kubectl delete pod measurement

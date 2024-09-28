@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: measurement-app
-  namespace: deviceshifu
 spec:
   replicas: 1
   selector:
